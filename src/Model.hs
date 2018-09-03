@@ -1,10 +1,12 @@
 module Model where
 
-import qualified Data.Map.Strict as Map
-import           Data.Map.Strict (Map, (!))
-import           GHC.Generics (Generic)
 import qualified Data.Binary as Bin
 import           Data.Binary (Binary)
+import qualified Data.Map.Strict as Map
+import           Data.Map.Strict (Map, (!))
+import Data.Maybe
+import GHC.Generics (Generic)
+import System.Random
 
 data Dir = UpD | DownD | RightD | LeftD
     deriving (Generic, Show)
@@ -103,12 +105,10 @@ data Unit
            , unitHp :: Int
            , unitPos :: Coord
            }
-
-unitIsAlive :: Unit -> Bool
-unitIsAlive = (> 0) . unitHp
+    deriving Eq
 
 defaultUnit :: Coord -> Unit
-defaultUnit pos = Unit 4 5 pos
+defaultUnit = Unit 4 5
 
 data GameState
     = GameState { gsUnits :: Map Uid Unit
@@ -116,17 +116,53 @@ data GameState
                 , gsCoordSys :: CoordSys
                 }
 
-findUnitByPos :: GameState -> Coord -> Maybe Unit
-findUnitByPos gs pos
-    = let u = Map.elems . Map.filter ((== pos) . unitPos) . gsUnits $ gs
-      in case u of
-          [x] -> Just x
-          [] -> Nothing
-          _ -> error "Many units at same position."
+emptyGameState :: CoordSys -> GameState
+emptyGameState = GameState Map.empty Nothing 
+
+findUnitsByPos :: GameState -> Coord -> [Unit]
+findUnitsByPos gs pos
+    = Map.elems . Map.filter ((== pos) . unitPos) . gsUnits $ gs
+
+findAliveUnitByPos :: GameState -> Coord -> Maybe Unit
+findAliveUnitByPos gs = listToMaybe . filter ((> 0) . unitHp) . findUnitsByPos gs
+
+findUidsByPos :: GameState -> Coord -> [Uid]
+findUidsByPos gs pos
+    = Map.keys . Map.filter ((== pos) . unitPos) . gsUnits $ gs
+
+findAliveUidByPos :: GameState -> Coord -> Maybe Uid
+findAliveUidByPos gs = listToMaybe . filter (isUnitAlive gs) . findUidsByPos gs
 
 findUnitById :: GameState -> Uid -> Unit
 findUnitById gs uid
     = (gsUnits gs) ! uid
+
+modifyUnitById :: GameState -> Uid -> (Unit -> Unit) -> GameState
+modifyUnitById gs uid f
+    = gs { gsUnits = Map.update (Just . f) uid . gsUnits $ gs }
+
+isUnitAlive :: GameState -> Uid -> Bool
+isUnitAlive gs = (> 0) . unitHp . findUnitById gs
+
+inSight :: GameState -> Uid -> Coord -> Bool
+inSight gs uid
+    = let unit = findUnitById gs uid
+      in (< unitSight unit) . distance (unitPos unit)
+
+amIAlive :: GameState -> Bool
+amIAlive gs = case gsMyUid gs of
+    Just uid -> isUnitAlive gs uid
+    Nothing -> False
+
+genLocation :: GameState -> IO Coord
+genLocation gs = do
+    x <- getStdRandom (randomR coordRange)
+    y <- getStdRandom (randomR coordRange)
+    case findAliveUnitByPos gs (x, y) of
+        Nothing -> return (x, y)
+        Just _ -> genLocation gs
+    where coordRange = let CoordSys size = gsCoordSys gs
+                       in (0, size - 1)
 
 runProgram :: GameState -> Program a -> (a, GameState)
 runProgram gs (PureP a) = (a, gs)
@@ -141,9 +177,22 @@ runCommand gs (Spawn pos)
       in (uid, gs')
 runCommand gs (Move uid dir)
     = let unit = gsUnits gs ! uid
-          unit' = unit { unitPos = moveCoord (gsCoordSys gs) dir (unitPos unit) }
-          gs' = gs { gsUnits = Map.insert uid unit' (gsUnits gs) }
-      in ((), gs')
+          newpos = moveCoord (gsCoordSys gs) dir (unitPos unit)
+      in if newpos == unitPos unit
+         then ((), gs)
+         else case findAliveUidByPos gs newpos of
+             Just tuid ->
+                 let tunit = findUnitById gs tuid
+                     newhp = unitHp tunit - 1
+                 in if newhp <= 0
+                    then ((), gs { gsUnits = Map.insert uid unit { unitPos = newpos }
+                                           . Map.insert tuid tunit { unitHp = newhp }
+                                           . gsUnits
+                                           $ gs })
+                    else ((), gs { gsUnits = Map.insert tuid tunit { unitHp = newhp } . gsUnits $ gs })
+             Nothing ->
+                 let unit' = unit { unitPos = newpos }
+                     gs' = gs { gsUnits = Map.insert uid unit' (gsUnits gs) }
+                 in ((), gs')
 runCommand gs (Quit uid)
-    = let gs' = gs { gsUnits = Map.delete uid (gsUnits gs) }
-      in ((), gs')
+    = ((), modifyUnitById gs uid $ \u -> u { unitHp = 0 })

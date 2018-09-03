@@ -12,19 +12,39 @@ data Message
     = Join String
     | Command WrappedCommand
     | Poll
-    | Quit String
+    | NoCommand
     deriving (Generic, Show)
 instance Binary Message
 
-serializeIO :: Binary a => Handle -> a -> IO ()
-serializeIO handle a = do
+isJoin :: Message -> Bool
+isJoin (Join _) = True
+isJoin _ = False
+
+isCommand :: Message -> Bool
+isCommand (Command _) = True
+isCommand _ = False
+
+isCommandOrNoCommand :: Message -> Bool
+isCommandOrNoCommand (Command _) = True
+isCommandOrNoCommand NoCommand = True
+isCommandOrNoCommand _ = False
+
+expect :: Binary a => Handle -> (a -> Bool) -> IO a
+expect hdl pred = do
+    msg <- unserialize hdl
+    if pred msg then return msg
+    else expect hdl pred
+
+serialize :: Binary a => Handle -> a -> IO ()
+serialize handle a = do
     let bs = encode a
     let len = fromIntegral . BS.length $ bs :: Word16
     BS.hPut handle . encode $ len
     BS.hPut handle bs
+    hFlush handle
 
-unserializeIO :: Binary a => Handle -> IO a
-unserializeIO handle = do
+unserialize :: Binary a => Handle -> IO a
+unserialize handle = do
     lenBs <- BS.hGet handle 2
     let len = fromIntegral (decode lenBs :: Word16)
     bs <- BS.hGet handle len
