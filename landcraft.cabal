@@ -24,3 +24,4 @@ executable landcraft
                  , containers -any
                  , network -any
                  , random -any
+                 , ansi-terminal -any

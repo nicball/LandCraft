@@ -7,6 +7,7 @@ import Control.Exception
 import Control.Monad
 import Data.Maybe
 import Network.Socket
+import System.Console.ANSI
 import System.IO
 
 import Network
@@ -33,10 +34,9 @@ startClient userName serverName serverPort
                   msg <- unserialize hdl :: IO (Maybe String, Message)
                   case msg of
                       (Nothing, Poll) -> do
-                          gs <- takeMVar game
+                          gs <- readMVar game
                           case gsMyUid gs of
                               Just _ -> do
-                                  putMVar game gs
                                   if amIAlive gs
                                   then do
                                       putStrLn "Input command: "
@@ -46,26 +46,21 @@ startClient userName serverName serverPort
                               Nothing -> do
                                   coord <- genLocation gs
                                   serialize hdl (Command (WrappedCommand (Spawn coord)))
-                                  putMVar game gs
-                      (Just name, Command (WrappedCommand cmd@(Spawn _))) 
-                          | name == userName -> do
-                          gs <- takeMVar game
-                          let (uid, gs') = runCommand gs cmd
-                          putMVar game gs' { gsMyUid = Just uid }
-                          gs <- readMVar game
-                          printGame gs
-                      (Just _, Command (WrappedCommand cmd)) -> do
-                          gs <- takeMVar game
-                          let (_, gs') = runCommand gs cmd
-                          putMVar game gs'
-                          gs <- readMVar game
-                          printGame gs
+                      (Just nm, Command (WrappedCommand cmd)) -> do
+                          modifyMVar_ game $ \gs -> do
+                              let gs' = case cmd of
+                                      Spawn _ | nm == userName ->
+                                          let (uid, gs') = runCommand gs cmd
+                                          in gs' { gsMyUid = Just uid }
+                                      _ -> snd . runCommand gs $ cmd
+                              printGame gs'
+                              return gs'
                       (Just _, Join name) ->
                           putStrLn (name ++ " joined the game.")
                       _ -> 
                           putStrLn ("Unknown command " ++ show msg)
                   gs <- readMVar game
-                  if allDead gs
+                  if allDead gs && isJust (gsMyUid gs)
                   then do
                       putStrLn "Everyone died. Game over."
                       return False
@@ -99,11 +94,18 @@ printGame gs = do
                     Just unit -> genUnitMe (findUnitById gs uid) unit
                     Nothing -> plainTile
                 else mistTile
-          genUnit _ = "U"
-          genUnitMe me unit = if me == unit
-                              then "M"
-                              else "E"
-
+          genUnit unit = withColor unit "U"
+          genUnitMe me unit = withColor unit $
+              if me == unit
+              then "M"
+              else "U"
+          withColor unit str
+              = let hp = unitHp unit
+                    color = setSGRCode [SetColor Foreground Vivid $
+                        if hp >= 5 then Green
+                        else if hp >= 3 then Yellow
+                        else Red]
+                in color ++ str ++ setSGRCode []
 getInputs :: MVar GameState -> IO (Chan WrappedCommand)
 getInputs game = do
     inputChan <- newChan
