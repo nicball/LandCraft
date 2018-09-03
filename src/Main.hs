@@ -14,5 +14,5 @@ main = do
         ["server", port] -> startServer (read port)
         ["client", name] -> startClient name serverName (show serverPort)
         ["client", name, serverName] -> startClient name serverName (show serverPort)
-        ["client", name, serverName, serverPort] -> startClient name serverName (show serverPort)
-        _ -> putStrLn "Unknown command line argyments."
+        ["client", name, serverName, serverPort] -> startClient name serverName serverPort
+        _ -> putStrLn "Unknown command line arguments."
