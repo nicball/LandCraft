@@ -154,6 +154,9 @@ amIAlive gs = case gsMyUid gs of
     Just uid -> isUnitAlive gs uid
     Nothing -> False
 
+allDead :: GameState -> Bool
+allDead = all ((<= 0) . unitHp) . (Map.elems . gsUnits)
+
 genLocation :: GameState -> IO Coord
 genLocation gs = do
     x <- getStdRandom (randomR coordRange)

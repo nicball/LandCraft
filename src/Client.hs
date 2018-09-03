@@ -64,6 +64,7 @@ startClient userName serverName serverPort
                           putStrLn (name ++ " joined the game.")
                       _ -> 
                           putStrLn ("Unknown command " ++ show msg)
+                  gs <- readMVar game
                   if allDead gs
                   then do
                       putStrLn "Everyone died. Game over."
