@@ -31,7 +31,7 @@ startClient userName serverName serverPort
               (Nothing, JoinResp joined) <- unserialize hdl
                   :: IO (Maybe String, Message)
               if joined
-              then do putStrLn "Joined game."
+              then do putStrLn "Connected. Waiting for enough players."
                       gameLoop hdl
               else do putStrLn "Name already used. Exiting."
                       return ()
