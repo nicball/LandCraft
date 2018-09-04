@@ -10,6 +10,7 @@ import Model
 
 data Message
     = Join String
+    | JoinResp Bool
     | Command WrappedCommand
     | Poll
     | NoCommand

@@ -16,7 +16,7 @@ import Config
 
 startClient :: String-> String -> String -> IO ()
 startClient userName serverName serverPort
-    = withSocketsDo . bracket openConn hClose $ gameLoop
+    = withSocketsDo . bracket openConn hClose $ startGame
     where openConn = do
               putStrLn ("Connecting " ++ serverName ++ ":" ++ serverPort ++ " ...")
               let hints = defaultHints { addrSocketType = Stream }
@@ -26,12 +26,21 @@ startClient userName serverName serverPort
               hdl <- socketToHandle sock ReadWriteMode
               hSetBuffering hdl (BlockBuffering Nothing)
               return hdl
-          gameLoop hdl = do
+          startGame hdl = do
               serialize hdl (Join userName)
+              (Nothing, JoinResp joined) <- unserialize hdl
+                  :: IO (Maybe String, Message)
+              if joined
+              then do putStrLn "Joined game."
+                      gameLoop hdl
+              else do putStrLn "Name already used. Exiting."
+                      return ()
+          gameLoop hdl = do
               game <- newMVar (emptyGameState mapSize)
               inputChan <- getInputs game
               while $ do
-                  msg <- unserialize hdl :: IO (Maybe String, Message)
+                  msg <- unserialize hdl
+                      :: IO (Maybe String, Message)
                   case msg of
                       (Nothing, Poll) -> do
                           gs <- readMVar game
@@ -84,6 +93,8 @@ printGame gs = do
     putChar '\n'
     where genTiles gs = if amIAlive gs
                         then genView gs (fromJust . gsMyUid $ gs)
+                        else if isNothing . gsMyUid $ gs
+                        then genMist
                         else genAll gs
           genAll gs x y = case findAliveUnitByPos gs (x, y) of
               Just unit -> genUnit unit
@@ -94,6 +105,7 @@ printGame gs = do
                     Just unit -> genUnitMe (findUnitById gs uid) unit
                     Nothing -> plainTile
                 else mistTile
+          genMist x y = mistTile
           genUnit unit = withColor unit "U"
           genUnitMe me unit = withColor unit $
               if me == unit
@@ -106,6 +118,7 @@ printGame gs = do
                         else if hp >= 3 then Yellow
                         else Red]
                 in color ++ str ++ setSGRCode []
+
 getInputs :: MVar GameState -> IO (Chan WrappedCommand)
 getInputs game = do
     inputChan <- newChan
@@ -118,10 +131,10 @@ getInputs game = do
               uidm <- gsMyUid <$> readMVar game
               case uidm of
                   Just uid -> case c of
-                      'w' -> return . WrappedCommand . Move uid $ UpD
-                      'a' -> return . WrappedCommand . Move uid $ LeftD
-                      's' -> return . WrappedCommand . Move uid $ DownD
-                      'd' -> return . WrappedCommand . Move uid $ RightD
-                      'q' -> return . WrappedCommand . Quit $ uid
+                      'w'-> return . WrappedCommand . Move uid $ UpD
+                      'a'-> return . WrappedCommand . Move uid $ LeftD
+                      's'-> return . WrappedCommand . Move uid $ DownD
+                      'd'-> return . WrappedCommand . Move uid $ RightD
+                      'q'-> return . WrappedCommand . Quit $ uid
                       _ -> readInput
                   Nothing -> readInput
