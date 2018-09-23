@@ -14,10 +14,10 @@ extra-source-files:
 
 executable landcraft
     main-is: Main.hs
-    other-modules: Model, Network, Server, Client, Config
+    other-modules: Model, Network, Server, Client, Config, Render
     hs-source-dirs: src
     default-language: Haskell2010
-    extensions: GADTs KindSignatures DeriveGeneric
+    extensions: GADTs KindSignatures DeriveGeneric QuasiQuotes
     build-depends: base >=4.7 && <5
                  , binary -any
                  , bytestring -any
@@ -25,3 +25,6 @@ executable landcraft
                  , network -any
                  , random -any
                  , ansi-terminal -any
+                 , raw-strings-qq -any
+                 , OpenGL -any
+                 , GLUT -any
