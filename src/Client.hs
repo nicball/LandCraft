@@ -45,7 +45,7 @@ startClient userName serverName serverPort
                       (Nothing, Poll) -> do
                           gs <- readMVar game
                           case gsMyUid gs of
-                              Just _ -> do
+                              Just _ ->
                                   if amIAlive gs
                                   then do
                                       putStrLn "Input command: "
@@ -55,7 +55,7 @@ startClient userName serverName serverPort
                               Nothing -> do
                                   coord <- genLocation gs
                                   serialize hdl (Command (WrappedCommand (Spawn coord)))
-                      (Just nm, Command (WrappedCommand cmd)) -> do
+                      (Just nm, Command (WrappedCommand cmd)) ->
                           modifyMVar_ game $ \gs -> do
                               let gs' = case cmd of
                                       Spawn _ | nm == userName ->
@@ -78,9 +78,7 @@ startClient userName serverName serverPort
 while :: IO Bool -> IO ()
 while action = do
     continue <- action
-    if continue
-    then while action
-    else return ()
+    when continue $ while action
 
 printGame :: GameState -> IO ()
 printGame gs = do

@@ -26,7 +26,7 @@ startServer port
             hPutStrLn stderr ("Incoming connection: " ++ show addr ++ ".")
             Join name <- expect hdl isJoin
             hPutStrLn stderr (name ++ " (" ++ show addr ++ ") connected.")
-            (joined, complete) <- modifyMVar sessions $ \ss -> do
+            (joined, complete) <- modifyMVar sessions $ \ss ->
                 if Map.member name ss
                 then return (ss, (False, Nothing))
                 else let ss' = Map.insert name hdl ss
