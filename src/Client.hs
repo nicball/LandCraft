@@ -1,18 +1,17 @@
 module Client where
 
 import Control.Concurrent
-import Control.Concurrent.Chan
 import Control.Concurrent.MVar
 import Control.Exception
 import Control.Monad
 import Data.Maybe
 import Network.Socket
-import System.Console.ANSI
 import System.IO
 
 import Network
 import Model
 import Config
+import Util
 
 startClient :: String-> String -> String -> IO ()
 startClient userName serverName serverPort
