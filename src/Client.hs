@@ -37,7 +37,7 @@ startClient userName serverName serverPort
                       return ()
           gameLoop hdl = do
               game <- newMVar (emptyGameState mapSize)
-              inputChan <- getInputs game
+              (terminal, inputChan) <- initUI game
               while $ do
                   msg <- unserialize hdl
                       :: IO (Maybe String, Message)
@@ -48,22 +48,20 @@ startClient userName serverName serverPort
                               Just _ ->
                                   if amIAlive gs
                                   then do
-                                      putStrLn "Input command: "
-                                      cmd <- readChan inputChan
+                                      cmd <- readTimeoutChan (Just 200) inputChan
                                       serialize hdl (Command cmd)
                                   else serialize hdl NoCommand
                               Nothing -> do
                                   coord <- genLocation gs
                                   serialize hdl (Command (WrappedCommand (Spawn coord)))
-                      (Just nm, Command (WrappedCommand cmd)) ->
-                          modifyMVar_ game $ \gs -> do
-                              let gs' = case cmd of
-                                      Spawn _ | nm == userName ->
-                                          let (uid, gs') = runCommand gs cmd
-                                          in gs' { gsMyUid = Just uid }
-                                      _ -> snd . runCommand gs $ cmd
-                              printGame gs'
-                              return gs'
+                      (Just nm, Command (WrappedCommand cmd)) -> do
+                          modifyMVar_ game $ \gs ->
+                              case cmd of
+                                  Spawn _ | nm == userName ->
+                                      let (uid, gs') = runCommand gs cmd
+                                      in return  gs' { gsMyUid = Just uid }
+                                  _ -> return . snd . runCommand gs $ cmd
+                          redrawTerminal terminal
                       (Just _, Join name) ->
                           putStrLn (name ++ " joined the game.")
                       _ -> 
@@ -117,22 +115,22 @@ printGame gs = do
                         else Red]
                 in color ++ str ++ setSGRCode []
 
-getInputs :: MVar GameState -> IO (Chan WrappedCommand)
-getInputs game = do
-    inputChan <- newChan
-    forkIO . forever $ do
-        cmd <- readInput
-        writeChan inputChan cmd
-    return inputChan
-    where readInput = do
-              c <- getChar
-              uidm <- gsMyUid <$> readMVar game
-              case uidm of
-                  Just uid -> case c of
-                      'w'-> return . WrappedCommand . Move uid $ UpD
-                      'a'-> return . WrappedCommand . Move uid $ LeftD
-                      's'-> return . WrappedCommand . Move uid $ DownD
-                      'd'-> return . WrappedCommand . Move uid $ RightD
-                      'q'-> return . WrappedCommand . Quit $ uid
-                      _ -> readInput
-                  Nothing -> readInput
+initUI :: MVar GameState -> IO (Terminal, TimeoutChan WrappedCommand)
+initUI game = do
+    inputChan <- newTimeoutChan
+    term <- createTerminal "LandCraft" (drawGame game) (parseKey game inputChan)
+    forkIO startTerminals
+    return (term, inputChan)
+
+parseKey :: MVar GameState -> TimeoutChan WrappedCommand -> Char -> IO ()
+parseKey game chan char = do
+    uidm <- gsMyUid <$> readMVar game
+    case uidm of
+        Just uid -> case c of
+            'w'-> writeTimeoutChan ch . WrappedCommand . Move uid $ UpD
+            'a'-> writeTimeoutChan ch . WrappedCommand . Move uid $ LeftD
+            's'-> writeTimeoutChan ch . WrappedCommand . Move uid $ DownD
+            'd'-> writeTimeoutChan ch . WrappedCommand . Move uid $ RightD
+            'q'-> writeTimeoutChan ch . WrappedCommand . Quit $ uid
+            _ -> return ()
+        Nothing -> return ()

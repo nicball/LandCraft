@@ -28,3 +28,4 @@ executable landcraft
                  , raw-strings-qq -any
                  , OpenGL -any
                  , GLUT -any
+                 , clock -any
