@@ -68,23 +68,23 @@ createDrawer
     = withObjectName2 $ \vao vbo -> do
         bindVertexArrayObject $= Just vao
         bindBuffer ArrayBuffer $= Just vbo
-        prog <- loadProgram
-        vpos <- get $ attribLocation prog "vpos"
-        vcolor <- get $ attribLocation prog "vcolor"
-        vtexcoord <- get $ attribLocation prog "vtexcoord"
-        let stride = fromIntegral . glFloatSize $ 2 + 4 + 2
-        vertexAttribPointer vpos $=
-            (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 0))
-        vertexAttribArray vpos $= Enabled
-        vertexAttribPointer vcolor $=
-            (ToFloat, VertexArrayDescriptor 4 Float stride (glFloatOffset 2))
-        vertexAttribArray vcolor $= Enabled
-        vertexAttribPointer vtexcoord $=
-            (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 6))
-        vertexAttribArray vtexcoord $= Enabled
-        bindVertexArrayObject $= Nothing
-        checkGLError
-        return (Drawer vao vbo prog)
+        withProgram $ \prog -> do
+            vpos <- get $ attribLocation prog "vpos"
+            vcolor <- get $ attribLocation prog "vcolor"
+            vtexcoord <- get $ attribLocation prog "vtexcoord"
+            let stride = fromIntegral . glFloatSize $ 2 + 4 + 2
+            vertexAttribPointer vpos $=
+                (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 0))
+            vertexAttribArray vpos $= Enabled
+            vertexAttribPointer vcolor $=
+                (ToFloat, VertexArrayDescriptor 4 Float stride (glFloatOffset 2))
+            vertexAttribArray vcolor $= Enabled
+            vertexAttribPointer vtexcoord $=
+                (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 6))
+            vertexAttribArray vtexcoord $= Enabled
+            bindVertexArrayObject $= Nothing
+            checkGLError
+            return (Drawer vao vbo prog)
 
 destroyDrawer :: Drawer -> IO ()
 destroyDrawer (Drawer vao vbo prog) = do
@@ -169,8 +169,8 @@ withShader ty source action = do
             shaderInfoLog shader >>= throwIO . DrawerException
         action shader
 
-loadProgram :: IO Program
-loadProgram = do
+withProgram :: (Program -> IO a) -> IO a
+withProgram action = do
     createProgram `bracketOnError` deleteObjectName $ \prog -> do
         withShader VertexShader vertexShaderSource $ \vs -> do
             attachShader prog vs
@@ -180,7 +180,7 @@ loadProgram = do
                 stat <- linkStatus prog
                 unless stat $
                     programInfoLog prog >>= throwIO . DrawerException
-                return prog
+                action prog
 
 vertexShaderSource :: String
 vertexShaderSource
