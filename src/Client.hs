@@ -12,6 +12,7 @@ import Network
 import Model
 import Config
 import Util
+import Render
 
 startClient :: String-> String -> String -> IO ()
 startClient userName serverName serverPort
@@ -47,7 +48,7 @@ startClient userName serverName serverPort
                               Just _ ->
                                   if amIAlive gs
                                   then do
-                                      cmd <- readTimeoutChan (Just 200) inputChan
+                                      cmd <- readTimeoutChan inputChan (Just 200) 
                                       serialize hdl (Command cmd)
                                   else serialize hdl NoCommand
                               Nothing -> do
@@ -125,11 +126,11 @@ parseKey :: MVar GameState -> TimeoutChan WrappedCommand -> Char -> IO ()
 parseKey game chan char = do
     uidm <- gsMyUid <$> readMVar game
     case uidm of
-        Just uid -> case c of
-            'w'-> writeTimeoutChan ch . WrappedCommand . Move uid $ UpD
-            'a'-> writeTimeoutChan ch . WrappedCommand . Move uid $ LeftD
-            's'-> writeTimeoutChan ch . WrappedCommand . Move uid $ DownD
-            'd'-> writeTimeoutChan ch . WrappedCommand . Move uid $ RightD
-            'q'-> writeTimeoutChan ch . WrappedCommand . Quit $ uid
+        Just uid -> case char of
+            'w'-> writeTimeoutChan chan . WrappedCommand . Move uid $ UpD
+            'a'-> writeTimeoutChan chan . WrappedCommand . Move uid $ LeftD
+            's'-> writeTimeoutChan chan . WrappedCommand . Move uid $ DownD
+            'd'-> writeTimeoutChan chan . WrappedCommand . Move uid $ RightD
+            'q'-> writeTimeoutChan chan . WrappedCommand . Quit $ uid
             _ -> return ()
         Nothing -> return ()

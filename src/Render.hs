@@ -16,7 +16,7 @@ data Terminal
 createTerminal :: String -> (Drawer -> IO ()) -> (Char -> IO ()) -> IO Terminal
 createTerminal windowName redrawCb keyCb = do
     getArgsAndInitialize
-    initialDisplayMode $= [RGBAMode, WithAlphaComponent]
+    initialDisplayMode $= [RGBAMode]
     initialContextVersion $= (3, 3)
     initialContextProfile $= [CoreProfile]
     win <- createWindow windowName
@@ -24,6 +24,11 @@ createTerminal windowName redrawCb keyCb = do
     displayCallback $= redrawCb drawer
     keyboardCallback $= Just (\ch _ -> keyCb ch)
     return $ Terminal win drawer
+
+destroyTerminal :: Terminal -> IO ()
+destroyTerminal (Terminal win drawer) = do
+    destroyWindow win
+    destroyDrawer drawer
 
 redrawTerminal :: Terminal -> IO ()
 redrawTerminal (Terminal win _) = postRedisplay (Just win)
@@ -107,6 +112,7 @@ drawColor drawer mode vcs = do
     let buffer = concatMap (\(v, c) -> v2l v ++ c2l c ++ [0, 0]) vcs
         v2l (x, y) = [x, y]
         c2l (r, g, b, a) = [r, g, b, a]
+    putStrLn . show $ buffer
     withArray buffer $ \ptr -> do
         let size = fromIntegral $ length buffer * sizeOf (1 :: GLfloat)
         bindBuffer ArrayBuffer $= Just (drawer_vbo drawer)
@@ -123,6 +129,7 @@ drawImage drawer (Image image imgw imgh) (posX, posY) width height = do
         uniformLocation (drawer_program drawer) "tex"
     uniform enable_texture $= (1 :: GLint)
     uniform tex $= TextureUnit 0
+    texture Texture2D $= Enabled
     activeTexture $= TextureUnit 0
     textureBinding Texture2D $= Just image
     bindVertexArrayObject $= Just (drawer_vao drawer)
@@ -140,38 +147,39 @@ drawImage drawer (Image image imgw imgh) (posX, posY) width height = do
     drawArrays Triangles 0 . fromIntegral $ length buffer
     bindVertexArrayObject $= Nothing
 
-loadShader :: ShaderType -> String -> IO Shader
-loadShader ty source = do
-    createShader ty `bracketOnError` deleteObjectName $ \shader -> do
+withShader :: ShaderType -> String -> (Shader -> IO a) -> IO a
+withShader ty source action = do
+    createShader ty `bracket` deleteObjectName $ \shader -> do
         shaderSourceBS shader $= packUtf8 source
         compileShader shader
         stat <- compileStatus shader
         unless stat $
             shaderInfoLog shader >>= throwIO . DrawerException
-        return shader
+        action shader
 
 loadProgram :: IO Program
 loadProgram = do
     createProgram `bracketOnError` deleteObjectName $ \prog -> do
-        loadShader VertexShader vertexShaderSource
-            >>= attachShader prog
-        loadShader FragmentShader fragmentShaderSource
-            >>= attachShader prog
-        linkProgram prog
-        stat <- linkStatus prog
-        unless stat $
-            programInfoLog prog >>= throwIO . DrawerException
-        return prog
+        withShader VertexShader vertexShaderSource $ \vs -> do
+            attachShader prog vs
+            withShader FragmentShader fragmentShaderSource $ \fs -> do
+                attachShader prog fs
+                linkProgram prog
+                stat <- linkStatus prog
+                unless stat $
+                    programInfoLog prog >>= throwIO . DrawerException
+                return prog
 
 vertexShaderSource :: String
 vertexShaderSource
-    = [r| #version330 core
+    = [r| #version 330 core
           in vec2 vpos;
           in vec4 vcolor;
           in vec2 vtexcoord;
           out vec4 fcolor;
+          out vec2 ftexcoord;
           void main() {
-              gl_Position = vpos;
+              gl_Position = vec4(vpos, 0, 1);
               fcolor = vcolor;
               ftexcoord = vtexcoord;
           }
