@@ -112,7 +112,6 @@ drawColor drawer mode vcs = do
     let buffer = concatMap (\(v, c) -> v2l v ++ c2l c ++ [0, 0]) vcs
         v2l (x, y) = [x, y]
         c2l (r, g, b, a) = [r, g, b, a]
-    putStrLn . show $ buffer
     withArray buffer $ \ptr -> do
         let size = fromIntegral $ length buffer * sizeOf (1 :: GLfloat)
         bindBuffer ArrayBuffer $= Just (drawer_vbo drawer)
