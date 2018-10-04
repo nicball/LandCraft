@@ -7,23 +7,29 @@ import Foreign.Ptr
 import Foreign.Storable
 import Graphics.UI.GLUT
 import Text.RawString.QQ
+import qualified Graphics.Rendering.OpenGL.GLU.Errors as GLE
 
 data Terminal
     = Terminal { term_window :: Window 
                , term_drawer :: Drawer
                }
 
-createTerminal :: String -> (Drawer -> IO ()) -> (Char -> IO ()) -> IO Terminal
-createTerminal windowName redrawCb keyCb = do
+initTerminalSystem :: IO ()
+initTerminalSystem = do
     getArgsAndInitialize
-    initialDisplayMode $= [RGBAMode]
+    initialDisplayMode $= [RGBAMode, WithAlphaComponent]
     initialContextVersion $= (3, 3)
     initialContextProfile $= [CoreProfile]
+
+createTerminal :: String -> (Drawer -> IO ()) -> (Char -> IO ()) -> IO Terminal
+createTerminal windowName redrawCb keyCb = do
     win <- createWindow windowName
     drawer <- createDrawer
     displayCallback $= redrawCb drawer
     keyboardCallback $= Just (\ch _ -> keyCb ch)
-    return $ Terminal win drawer
+    let term = Terminal win drawer
+    checkGLError `onException` destroyTerminal term
+    return term
 
 destroyTerminal :: Terminal -> IO ()
 destroyTerminal (Terminal win drawer) = do
@@ -33,11 +39,12 @@ destroyTerminal (Terminal win drawer) = do
 redrawTerminal :: Terminal -> IO ()
 redrawTerminal (Terminal win _) = postRedisplay (Just win)
 
-startTerminals :: IO ()
-startTerminals = mainLoop
+runTerminals :: IO ()
+runTerminals = mainLoop
 
 data DrawerException
     = DrawerException String
+    | GLException String [GLE.Error]
     deriving Show
 
 instance Exception DrawerException
@@ -49,7 +56,7 @@ data Drawer
              }
 
 data Image
-    = Image TextureObject GLfloat GLfloat
+    = Image TextureObject
 
 type DrwVertex = (GLfloat, GLfloat)
 type DrwColor = (GLfloat, GLfloat, GLfloat, GLfloat)
@@ -57,27 +64,27 @@ type DrwTexcoord = (GLfloat, GLfloat)
 type ScreenCoord = (GLfloat, GLfloat)
 
 createDrawer :: IO Drawer
-createDrawer = do
-    vao <- genObjectName
-    bindVertexArrayObject $= Just vao
-    vbo <- genObjectName
-    bindBuffer ArrayBuffer $= Just vbo
-    prog <- loadProgram
-    vpos <- get $ attribLocation prog "vpos"
-    vcolor <- get $ attribLocation prog "vcolor"
-    vtexcoord <- get $ attribLocation prog "vtexcoord"
-    let stride = fromIntegral . glFloatSize $ 2 + 4 + 2
-    vertexAttribPointer vpos $=
-        (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 0))
-    vertexAttribArray vpos $= Enabled
-    vertexAttribPointer vcolor $=
-        (ToFloat, VertexArrayDescriptor 4 Float stride (glFloatOffset 2))
-    vertexAttribArray vcolor $= Enabled
-    vertexAttribPointer vtexcoord $=
-        (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 6))
-    vertexAttribArray vtexcoord $= Enabled
-    bindVertexArrayObject $= Nothing
-    return (Drawer vao vbo prog)
+createDrawer
+    = withObjectName2 $ \vao vbo -> do
+        bindVertexArrayObject $= Just vao
+        bindBuffer ArrayBuffer $= Just vbo
+        prog <- loadProgram
+        vpos <- get $ attribLocation prog "vpos"
+        vcolor <- get $ attribLocation prog "vcolor"
+        vtexcoord <- get $ attribLocation prog "vtexcoord"
+        let stride = fromIntegral . glFloatSize $ 2 + 4 + 2
+        vertexAttribPointer vpos $=
+            (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 0))
+        vertexAttribArray vpos $= Enabled
+        vertexAttribPointer vcolor $=
+            (ToFloat, VertexArrayDescriptor 4 Float stride (glFloatOffset 2))
+        vertexAttribArray vcolor $= Enabled
+        vertexAttribPointer vtexcoord $=
+            (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 6))
+        vertexAttribArray vtexcoord $= Enabled
+        bindVertexArrayObject $= Nothing
+        checkGLError
+        return (Drawer vao vbo prog)
 
 destroyDrawer :: Drawer -> IO ()
 destroyDrawer (Drawer vao vbo prog) = do
@@ -86,18 +93,23 @@ destroyDrawer (Drawer vao vbo prog) = do
     deleteObjectName prog
 
 createImage :: Integral a => a -> a -> [DrwColor] -> IO Image
-createImage width height pixels = do
-    tex <- genObjectName
-    textureBinding Texture2D $= Just tex
-    let buffer = concatMap (\(r, g, b, a) -> [r, g, b, a]) pixels
-    withArray buffer $ \ptr ->
-        texImage2D Texture2D NoProxy 0 RGBA' (TextureSize2D (fromIntegral width) (fromIntegral height))
-            0 (PixelData RGBA Float ptr)
-    generateMipmap' Texture2D
-    return (Image tex (fromIntegral width) (fromIntegral height))
+createImage width height pixels
+    = withObjectName $ \tex -> do
+        activeTexture $= TextureUnit 0
+        textureBinding Texture2D $= Just tex
+        let buffer = concatMap (\(r, g, b, a) -> [r, g, b, a]) pixels
+        withArray buffer $ \ptr ->
+            texImage2D Texture2D NoProxy 0 RGBA' (TextureSize2D (fromIntegral width) (fromIntegral height))
+                0 (PixelData RGBA Float ptr)
+        generateMipmap' Texture2D
+        textureFilter Texture2D $= ((Linear', Just Linear'), Linear')
+        textureWrapMode Texture2D S $= (Repeated, Repeat)
+        textureWrapMode Texture2D T $= (Repeated, Repeat)
+        checkGLError
+        return (Image tex)
 
 destroyImage :: Image -> IO ()
-destroyImage (Image tex _ _) = deleteObjectName tex
+destroyImage (Image tex) = deleteObjectName tex
 
 drawColor :: Drawer -> PrimitiveMode -> [(DrwVertex, DrwColor)] -> IO ()
 drawColor drawer mode vcs = do
@@ -118,9 +130,10 @@ drawColor drawer mode vcs = do
         bufferData ArrayBuffer $= (size, ptr, StaticDraw)
     drawArrays mode 0 . fromIntegral $ length vcs
     bindVertexArrayObject $= Nothing
+    checkGLError
 
 drawImage :: Drawer -> Image -> (GLfloat, GLfloat) -> GLfloat -> GLfloat -> IO ()
-drawImage drawer (Image image imgw imgh) (posX, posY) width height = do
+drawImage drawer (Image image) (posX, posY) width height = do
     currentProgram $= Just (drawer_program drawer)
     enable_texture <- get $
         uniformLocation (drawer_program drawer) "enable_texture"
@@ -128,16 +141,15 @@ drawImage drawer (Image image imgw imgh) (posX, posY) width height = do
         uniformLocation (drawer_program drawer) "tex"
     uniform enable_texture $= (1 :: GLint)
     uniform tex $= TextureUnit 0
-    texture Texture2D $= Enabled
     activeTexture $= TextureUnit 0
     textureBinding Texture2D $= Just image
     bindVertexArrayObject $= Just (drawer_vao drawer)
-    let buffer = [ posX        , posY         , 0, 0, 0, 0, 0   , imgh
-                 , posX        , posY - height, 0, 0, 0, 0, 0   , 0
-                 , posX + width, posY - height, 0, 0, 0, 0, imgw, 0
-                 , posX        , posY         , 0, 0, 0, 0, 0   , imgh
-                 , posX + width, posY         , 0, 0, 0, 0, imgw, imgh
-                 , posX + width, posY - height, 0, 0, 0, 0, imgw, 0
+    let buffer = [ posX        , posY         , 1, 1, 1, 1, 0, 0
+                 , posX        , posY + height, 1, 1, 1, 1, 0, 1
+                 , posX + width, posY         , 1, 1, 1, 1, 1, 0
+                 , posX        , posY + height, 1, 1, 1, 1, 0, 1
+                 , posX + width, posY         , 1, 1, 1, 1, 1, 0
+                 , posX + width, posY + height, 1, 1, 1, 1, 1, 1
                  ]
     withArray buffer $ \ptr -> do
         let size = fromIntegral $ length buffer * sizeOf (1 :: GLfloat)
@@ -145,6 +157,7 @@ drawImage drawer (Image image imgw imgh) (posX, posY) width height = do
         bufferData ArrayBuffer $= (size, ptr, StaticDraw)
     drawArrays Triangles 0 . fromIntegral $ length buffer
     bindVertexArrayObject $= Nothing
+    checkGLError
 
 withShader :: ShaderType -> String -> (Shader -> IO a) -> IO a
 withShader ty source action = do
@@ -206,3 +219,27 @@ glFloatOffset n = bufferOffset $ n * sizeOf (1 :: GLfloat)
 
 glFloatSize :: Int -> Int
 glFloatSize n = n * sizeOf (1 :: GLfloat)
+
+checkGLError :: IO ()
+checkGLError = do
+    es <- get GLE.errors
+    when (not . null $ es) .
+        throwIO . GLException "" $ es
+
+debug ::String-> IO ()
+debug msg = do
+    es <- get GLE.errors
+    when (not . null $ es) .
+        throwIO . GLException msg$ es
+withObjectName :: GeneratableObjectName a => (a -> IO b) -> IO b
+withObjectName action = do
+    obj <- genObjectName
+    action obj `onException` deleteObjectName obj
+
+withObjectName2 :: (GeneratableObjectName a, GeneratableObjectName b)
+                => (a -> b -> IO c)
+                -> IO c
+withObjectName2 action
+    = withObjectName $ \a ->
+        withObjectName $ \b ->
+            action a b
