@@ -27,6 +27,8 @@ createTerminal windowName redrawCb keyCb = do
     drawer <- createDrawer
     displayCallback $= redrawCb drawer
     keyboardCallback $= Just (\ch _ -> keyCb ch)
+    reshapeCallback $= Just (\size -> viewport $= (Position 0 0, size)
+                                   >> redrawCb drawer)
     let term = Terminal win drawer
     checkGLError `onException` destroyTerminal term
     return term
@@ -135,6 +137,7 @@ drawColor drawer mode vcs = do
 drawImage :: Drawer -> Image -> (GLfloat, GLfloat) -> GLfloat -> GLfloat -> IO ()
 drawImage drawer (Image image) (posX, posY) width height = do
     currentProgram $= Just (drawer_program drawer)
+    bindVertexArrayObject $= Just (drawer_vao drawer)
     enable_texture <- get $
         uniformLocation (drawer_program drawer) "enable_texture"
     tex <- get $
@@ -143,7 +146,6 @@ drawImage drawer (Image image) (posX, posY) width height = do
     uniform tex $= TextureUnit 0
     activeTexture $= TextureUnit 0
     textureBinding Texture2D $= Just image
-    bindVertexArrayObject $= Just (drawer_vao drawer)
     let buffer = [ posX        , posY         , 1, 1, 1, 1, 0, 0
                  , posX        , posY + height, 1, 1, 1, 1, 0, 1
                  , posX + width, posY         , 1, 1, 1, 1, 1, 0
@@ -226,11 +228,6 @@ checkGLError = do
     when (not . null $ es) .
         throwIO . GLException "" $ es
 
-debug ::String-> IO ()
-debug msg = do
-    es <- get GLE.errors
-    when (not . null $ es) .
-        throwIO . GLException msg$ es
 withObjectName :: GeneratableObjectName a => (a -> IO b) -> IO b
 withObjectName action = do
     obj <- genObjectName
