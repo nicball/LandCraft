@@ -2,54 +2,23 @@ module Render where
 
 import Control.Exception
 import Control.Monad
+import Data.StateVar
 import Foreign.Marshal.Array
+import Foreign.Marshal.Alloc
 import Foreign.Ptr
 import Foreign.Storable
-import Graphics.UI.GLUT
+import Graphics.Rendering.OpenGL.GL
+import qualified Graphics.UI.GLFW as GLFW
 import Text.RawString.QQ
 import qualified Graphics.Rendering.OpenGL.GLU.Errors as GLE
 
-data Terminal
-    = Terminal { term_window :: Window 
-               , term_drawer :: Drawer
-               }
-
-initTerminalSystem :: IO ()
-initTerminalSystem = do
-    getArgsAndInitialize
-    initialDisplayMode $= [RGBAMode, WithAlphaComponent]
-    initialContextVersion $= (3, 3)
-    initialContextProfile $= [CoreProfile]
-
-createTerminal :: String -> (Drawer -> IO ()) -> (Char -> IO ()) -> IO Terminal
-createTerminal windowName redrawCb keyCb = do
-    win <- createWindow windowName
-    drawer <- createDrawer
-    displayCallback $= redrawCb drawer
-    keyboardCallback $= Just (\ch _ -> keyCb ch)
-    reshapeCallback $= Just (\size -> viewport $= (Position 0 0, size)
-                                   >> redrawCb drawer)
-    let term = Terminal win drawer
-    checkGLError `onException` destroyTerminal term
-    return term
-
-destroyTerminal :: Terminal -> IO ()
-destroyTerminal (Terminal win drawer) = do
-    destroyWindow win
-    destroyDrawer drawer
-
-redrawTerminal :: Terminal -> IO ()
-redrawTerminal (Terminal win _) = postRedisplay (Just win)
-
-runTerminals :: IO ()
-runTerminals = mainLoop
-
-data DrawerException
+data RenderException
     = DrawerException String
     | GLException String [GLE.Error]
+    | GLFWException String
     deriving Show
 
-instance Exception DrawerException
+instance Exception RenderException
 
 data Drawer
     = Drawer { drawer_vao :: VertexArrayObject
@@ -64,6 +33,29 @@ type DrwVertex = (GLfloat, GLfloat)
 type DrwColor = (GLfloat, GLfloat, GLfloat, GLfloat)
 type DrwTexcoord = (GLfloat, GLfloat)
 type ScreenCoord = (GLfloat, GLfloat)
+
+withGLFW :: IO a -> IO a
+withGLFW action = do
+    GLFW.setErrorCallback . Just $ \err str ->
+        throwIO . GLFWException $ show err ++ ": " ++ str
+    success <- GLFW.init
+    unless success . throwIO . GLFWException $ "Unable to initialize GLFW."
+    action `finally` GLFW.terminate
+
+withWindow :: Int -> Int -> String -> (GLFW.Window -> IO a) -> IO a
+withWindow width height title action = do
+    win <- GLFW.createWindow width height title Nothing Nothing
+    case win of
+        Nothing -> throwIO . GLFWException $ "Unable to create windows."
+        Just w -> body w `finally` GLFW.destroyWindow w
+    where body win = do
+              (wid, hei) <- GLFW.getFramebufferSize win
+              onResize win wid hei
+              GLFW.setFramebufferSizeCallback win (Just onResize)
+              action win
+          onResize win wid hei = do
+              GLFW.makeContextCurrent (Just win)
+              viewport $= (Position 0 0, Size (fromIntegral wid) (fromIntegral hei))
 
 createDrawer :: IO Drawer
 createDrawer
@@ -103,10 +95,20 @@ createImage width height pixels
         withArray buffer $ \ptr ->
             texImage2D Texture2D NoProxy 0 RGBA' (TextureSize2D (fromIntegral width) (fromIntegral height))
                 0 (PixelData RGBA Float ptr)
-        generateMipmap' Texture2D
-        textureFilter Texture2D $= ((Linear', Just Linear'), Linear')
-        textureWrapMode Texture2D S $= (Repeated, Repeat)
-        textureWrapMode Texture2D T $= (Repeated, Repeat)
+        -- generateMipmap' Texture2D
+        -- textureFilter Texture2D $= ((Linear', Just Linear'), Linear')
+        -- textureWrapMode Texture2D S $= (Repeated, Repeat)
+        -- textureWrapMode Texture2D T $= (Repeated, Repeat)
+        let s = fromIntegral (width * height * 4) 
+        ptr <- mallocArray s :: IO (Ptr Float)
+        getTexImage Texture2D 0 (PixelData RGBA Float ptr)
+        buf <- peekArray s ptr
+        free ptr
+        -- putStrLn . show . toInteger $ width
+        -- putStrLn . show . toInteger $ height
+        putStrLn . show $ buf == buffer
+        putStrLn . show $ buf
+        putStrLn . show $ buffer
         checkGLError
         return (Image tex)
 
