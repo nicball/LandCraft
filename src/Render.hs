@@ -169,6 +169,7 @@ drawImage drawer (Image image) (posX, posY) width height = do
         bufferData ArrayBuffer $= (size, ptr, StaticDraw)
         bindBuffer ArrayBuffer $= Nothing
     drawArrays Triangles 0 . fromIntegral $ length buffer
+    textureBinding Texture2D $= Nothing
     bindVertexArrayObject $= Nothing
     checkGLError
 
