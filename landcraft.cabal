@@ -28,3 +28,4 @@ executable landcraft
                  , OpenGL -any
                  , GLUT -any
                  , clock -any
+                 , assert -any

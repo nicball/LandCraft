@@ -1,6 +1,7 @@
 module Render where
 
 import Control.Exception
+import Control.Exception.Assert
 import Control.Monad
 import Data.StateVar
 import Foreign.Marshal.Array
@@ -44,6 +45,10 @@ withGLFW action = do
 
 withWindow :: Int -> Int -> String -> (GLFW.Window -> IO a) -> IO a
 withWindow width height title action = do
+    GLFW.windowHint $ GLFW.WindowHint'ContextVersionMajor 3
+    GLFW.windowHint $ GLFW.WindowHint'ContextVersionMinor 3
+    GLFW.windowHint $ GLFW.WindowHint'OpenGLForwardCompat True
+    GLFW.windowHint $ GLFW.WindowHint'OpenGLProfile GLFW.OpenGLProfile'Core
     win <- GLFW.createWindow width height title Nothing Nothing
     case win of
         Nothing -> throwIO . GLFWException $ "Unable to create windows."
@@ -76,6 +81,7 @@ createDrawer
             vertexAttribPointer vtexcoord $=
                 (ToFloat, VertexArrayDescriptor 2 Float stride (glFloatOffset 6))
             vertexAttribArray vtexcoord $= Enabled
+            bindBuffer ArrayBuffer $= Nothing
             bindVertexArrayObject $= Nothing
             checkGLError
             return (Drawer vao vbo prog)
@@ -88,27 +94,28 @@ destroyDrawer (Drawer vao vbo prog) = do
 
 createImage :: Integral a => a -> a -> [DrwColor] -> IO Image
 createImage width height pixels
-    = withObjectName $ \tex -> do
-        activeTexture $= TextureUnit 0
+    = assert (length pixels == fromIntegral (width * height))
+    $ withObjectName $ \tex -> do
         textureBinding Texture2D $= Just tex
         let buffer = concatMap (\(r, g, b, a) -> [r, g, b, a]) pixels
         withArray buffer $ \ptr ->
             texImage2D Texture2D NoProxy 0 RGBA' (TextureSize2D (fromIntegral width) (fromIntegral height))
                 0 (PixelData RGBA Float ptr)
-        -- generateMipmap' Texture2D
-        -- textureFilter Texture2D $= ((Linear', Just Linear'), Linear')
-        -- textureWrapMode Texture2D S $= (Repeated, Repeat)
-        -- textureWrapMode Texture2D T $= (Repeated, Repeat)
-        let s = fromIntegral (width * height * 4) 
-        ptr <- mallocArray s :: IO (Ptr Float)
-        getTexImage Texture2D 0 (PixelData RGBA Float ptr)
-        buf <- peekArray s ptr
-        free ptr
+        generateMipmap' Texture2D
+        textureFilter Texture2D $= ((Linear', Just Linear'), Linear')
+        textureWrapMode Texture2D S $= (Repeated, Repeat)
+        textureWrapMode Texture2D T $= (Repeated, Repeat)
+        -- let s = fromIntegral (width * height * 4) 
+        -- ptr <- mallocArray s :: IO (Ptr Float)
+        -- getTexImage Texture2D 0 (PixelData RGBA Float ptr)
+        -- buf <- peekArray s ptr
+        -- free ptr
         -- putStrLn . show . toInteger $ width
         -- putStrLn . show . toInteger $ height
-        putStrLn . show $ buf == buffer
-        putStrLn . show $ buf
-        putStrLn . show $ buffer
+        -- putStrLn . show $ buf == buffer
+        -- putStrLn . show $ buf
+        -- putStrLn . show $ buffer
+        textureBinding Texture2D $= Nothing
         checkGLError
         return (Image tex)
 
@@ -132,6 +139,7 @@ drawColor drawer mode vcs = do
         let size = fromIntegral $ length buffer * sizeOf (1 :: GLfloat)
         bindBuffer ArrayBuffer $= Just (drawer_vbo drawer)
         bufferData ArrayBuffer $= (size, ptr, StaticDraw)
+        bindBuffer ArrayBuffer $= Nothing
     drawArrays mode 0 . fromIntegral $ length vcs
     bindVertexArrayObject $= Nothing
     checkGLError
@@ -159,6 +167,7 @@ drawImage drawer (Image image) (posX, posY) width height = do
         let size = fromIntegral $ length buffer * sizeOf (1 :: GLfloat)
         bindBuffer ArrayBuffer $= Just (drawer_vbo drawer)
         bufferData ArrayBuffer $= (size, ptr, StaticDraw)
+        bindBuffer ArrayBuffer $= Nothing
     drawArrays Triangles 0 . fromIntegral $ length buffer
     bindVertexArrayObject $= Nothing
     checkGLError
