@@ -24,3 +24,8 @@ readTimeoutChan (TimeoutChan ch) (Just timeout) = do
     else return a
 readTimeoutChan (TimeoutChan ch) Nothing
     = fst <$> readChan ch
+
+while :: IO Bool -> IO ()
+while action = do
+    continue <- action
+    when continue $ while action

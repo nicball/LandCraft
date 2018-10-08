@@ -5,105 +5,129 @@ import Control.Concurrent.MVar
 import Control.Exception
 import Control.Monad
 import Data.Maybe
+import Graphics.UI.GLFW
 import Network.Socket
 import System.IO
 
-import Network
-import Model
 import Config
-import Util
+import Model
+import Network
 import Render
+import Util
 
 startClient :: String-> String -> String -> IO ()
-startClient userName serverName serverPort
-    = withSocketsDo . bracket openConn hClose $ startGame
-    where openConn = do
-              putStrLn ("Connecting " ++ serverName ++ ":" ++ serverPort ++ " ...")
-              let hints = defaultHints { addrSocketType = Stream }
-              addr : _ <- getAddrInfo (Just hints) (Just serverName) (Just serverPort)
-              sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-              connect sock (addrAddress addr) `onException` close sock
-              hdl <- socketToHandle sock ReadWriteMode
-              hSetBuffering hdl (BlockBuffering Nothing)
-              return hdl
-          startGame hdl = do
-              serialize hdl (Join userName)
-              (Nothing, JoinResp joined) <- unserialize hdl
-                  :: IO (Maybe String, Message)
-              if joined
-              then do putStrLn "Connected. Waiting for enough players."
-                      gameLoop hdl
-              else do putStrLn "Name already used. Exiting."
-                      return ()
-          gameLoop hdl = do
-              game <- newMVar (emptyGameState mapSize)
-              (terminal, inputChan) <- initUI game
-              while $ do
-                  msg <- unserialize hdl
-                      :: IO (Maybe String, Message)
-                  case msg of
-                      (Nothing, Poll) -> do
-                          gs <- readMVar game
-                          case gsMyUid gs of
-                              Just _ ->
-                                  if amIAlive gs
-                                  then do
-                                      cmd <- readTimeoutChan inputChan (Just 200) 
-                                      serialize hdl (Command cmd)
-                                  else serialize hdl NoCommand
-                              Nothing -> do
-                                  coord <- genLocation gs
-                                  serialize hdl (Command (WrappedCommand (Spawn coord)))
-                      (Just nm, Command (WrappedCommand cmd)) -> do
-                          modifyMVar_ game $ \gs ->
-                              case cmd of
-                                  Spawn _ | nm == userName ->
-                                      let (uid, gs') = runCommand gs cmd
-                                      in return  gs' { gsMyUid = Just uid }
-                                  _ -> return . snd . runCommand gs $ cmd
-                          redrawTerminal terminal
-                      (Just _, Join name) ->
-                          putStrLn (name ++ " joined the game.")
-                      _ -> 
-                          putStrLn ("Unknown command " ++ show msg)
-                  gs <- readMVar game
-                  if allDead gs && isJust (gsMyUid gs)
-                  then do
-                      putStrLn "Everyone died. Game over."
-                      return False
-                  else return True
+startClient userName serverName serverPort = withSocketsDo $ do
+    gameState <- newMVar (emptyGameState mapSize)
+    userCmdChan <- newTimeoutChan
+    withGLFW $ do
+        ver <- getVersionString
+        case ver of
+            Just str -> putStrLn str
+            Nothing -> return ()
+        withWindow 600 600 "Land Craft" $ \win -> do
+            connected <- withConnection userName serverName serverPort $
+                forkIO . gameLogic gameState
+                                   userCmdChan
+                                   postEmptyEvent
+                                   (windowShouldClose win True)
+            when connected $ do
+                drawer <- createDrawer
+                clearColor $= Color4 0 0 0 0
+                setKeyCallback win . Just $ onKeyboard gameState userCmdChan
+                mainLoop win drawer gameState
+    where mainLoop win drawer gameState = do
+              clear [ColorBuffer]
+              gs <- readMVar gameState
+              drawGame drawer gs
+              swapBuffers win
+              waitEvents
+              closep <- windowShouldClose win
+              if closep 
+              then putStrLn "exiting"
+              else mainLoop win drawer
 
-while :: IO Bool -> IO ()
-while action = do
-    continue <- action
-    when continue $ while action
+withConnection :: String -> String -> String -> (Handle -> IO a) -> IO a
+withConnection userName serverName serverPort action = do
+    putStrLn ("Connecting " ++ serverName ++ ":" ++ serverPort ++ " ...")
+    let hints = defaultHints { addrSocketType = Stream }
+    addr : _ <- getAddrInfo (Just hints) (Just serverName) (Just serverPort)
+    sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+    connect sock (addrAddress addr) `onException` close sock
+    socketToHandle sock ReadWriteMode `bracketOnError` hClose $ \hdl ->
+        hSetBuffering hdl (BlockBuffering Nothing)
+        serialize hdl (Join userName)
+        (Nothing, JoinResp joined) <- unserialize hdl
+            :: IO (Maybe String, Message)
+        if joined
+        then do putStrLn "Connected. Waiting for enough players."
+                action hdl
+                return True
+        else do putStrLn "Name already used. Exiting."
+                return False
 
-printGame :: GameState -> IO ()
-printGame gs = do
-    let CoordSys size = gsCoordSys gs
-    let tiles = genTiles gs
-    forM_ [size - 1, size - 2 .. 0] $ \y -> do
-        forM_ [0 .. size - 1] $ \x ->
-            putStr (tiles x y)
-        putChar '\n'
-    putChar '\n'
-    where genTiles gs = if amIAlive gs
-                        then genView gs (fromJust . gsMyUid $ gs)
-                        else if isNothing . gsMyUid $ gs
-                        then genMist
-                        else genAll gs
-          genAll gs x y = case findAliveUnitByPos gs (x, y) of
-              Just unit -> genUnit unit
+gameLogic :: MVar GameState
+          -> TimeoutChan WrappedCommand
+          -> IO ()
+          -> IO ()
+          -> Handle
+          -> IO ()
+gameLogic gameState userCmdChan updateScreen gameOver conn
+    = while $ do
+        msg <- unserialize conn :: IO (Maybe String, Message)
+        case msg of
+            (Nothing, Poll) -> do
+                gs <- readMVar game
+                case gsMyUid gs of
+                    Just _ ->
+                        if amIAlive gs
+                        then do
+                            cmd <- readTimeoutChan inputChan (Just 200) 
+                            serialize conn (Command cmd)
+                        else serialize conn NoCommand
+                    Nothing -> do
+                        coord <- genLocation gs
+                        serialize conn (Command (WrappedCommand (Spawn coord)))
+            (Just nm, Command (WrappedCommand cmd)) -> do
+                modifyMVar_ game $ \gs ->
+                    case cmd of
+                        Spawn _ | nm == userName ->
+                            let (uid, gs') = runCommand gs cmd
+                            in return  gs' { gsMyUid = Just uid }
+                        _ -> return . snd . runCommand gs $ cmd
+                updateScreen
+            (Just _, Join name) ->
+                putStrLn (name ++ " joined the game.")
+            _ -> 
+                putStrLn ("Unknown command " ++ show msg)
+        gs <- readMVar game
+        if allDead gs && isJust (gsMyUid gs)
+        then do
+            putStrLn "Everyone died. Game over."
+            gameOver
+            return False
+        else return True
+
+drawGame :: Drawer -> GameState -> IO ()
+drawGame drawer gameState = do
+    let CoordSys size = gsCoordSys gameState
+    drawCells
+    if amIAlive gameState
+    then drawView (fromJust . gsMyUid $ gameState)
+    else if isNothing . gsMyUid $ gameState
+    then drawMist
+    else drawAll
+    where drawAll x y = case findAliveUnitByPos gameState (x, y) of
+              Just unit -> drawUnit unit
               Nothing -> plainTile
-          genView gs uid x y
-              = if inSight gs uid (x, y)
-                then case findAliveUnitByPos gs (x, y) of
-                    Just unit -> genUnitMe (findUnitById gs uid) unit
+          drawView uid x y
+              = if inSight gameState uid (x, y)
+                then case findAliveUnitByPos gameState (x, y) of
+                    Just unit -> drawUnitMe (findUnitById gameState uid) unit
                     Nothing -> plainTile
                 else mistTile
-          genMist x y = mistTile
-          genUnit unit = withColor unit "U"
-          genUnitMe me unit = withColor unit $
+          drawMist x y = mistTile
+          drawUnit unit = withColor unit "U"
+          drawUnitMe me unit = withColor unit $
               if me == unit
               then "M"
               else "U"
@@ -115,22 +139,22 @@ printGame gs = do
                         else Red]
                 in color ++ str ++ setSGRCode []
 
-initUI :: MVar GameState -> IO (Terminal, TimeoutChan WrappedCommand)
-initUI game = do
-    inputChan <- newTimeoutChan
-    term <- createTerminal "LandCraft" (drawGame game) (parseKey game inputChan)
-    forkIO startTerminals
-    return (term, inputChan)
-
-parseKey :: MVar GameState -> TimeoutChan WrappedCommand -> Char -> IO ()
-parseKey game chan char = do
-    uidm <- gsMyUid <$> readMVar game
-    case uidm of
-        Just uid -> case char of
-            'w'-> writeTimeoutChan chan . WrappedCommand . Move uid $ UpD
-            'a'-> writeTimeoutChan chan . WrappedCommand . Move uid $ LeftD
-            's'-> writeTimeoutChan chan . WrappedCommand . Move uid $ DownD
-            'd'-> writeTimeoutChan chan . WrappedCommand . Move uid $ RightD
-            'q'-> writeTimeoutChan chan . WrappedCommand . Quit $ uid
-            _ -> return ()
-        Nothing -> return ()
+onKeyboard :: Window
+           -> MVar GameState
+           -> TimeoutChan WrappedCommand
+           -> Window -> Key -> Int -> KeyState -> ModifierKeys -> IO ()
+onKeyboard win gameState userCmdChan evwin key _ keyState mods = do
+    if not (win == evwin && keyState == KeyState'Pressed && noMods)
+    then return ()
+    else do
+        uidm <- gsMyUid <$> readMVar game
+        case uidm of
+            Just uid -> case key of
+                Key'W -> writeTimeoutChan userCmdChan . WrappedCommand . Move uid $ UpD
+                Key'A -> writeTimeoutChan userCmdChan . WrappedCommand . Move uid $ LeftD
+                Key'S -> writeTimeoutChan userCmdChan . WrappedCommand . Move uid $ DownD
+                Key'D -> writeTimeoutChan userCmdChan . WrappedCommand . Move uid $ RightD
+                Key'Q -> writeTimeoutChan userCmdChan . WrappedCommand . Quit $ uid
+                _ -> return ()
+            Nothing -> return ()
+    where moMods = mods == ModifierKeys False False False False

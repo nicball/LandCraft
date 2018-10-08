@@ -13,9 +13,3 @@ roomSize = 2
 
 mapSize :: CoordSys
 mapSize = CoordSys 10
-
-plainTile :: String
-plainTile = "."
-
-mistTile :: String
-mistTile = "#"
