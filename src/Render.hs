@@ -62,12 +62,17 @@ withWindow width height title action = do
               GLFW.makeContextCurrent (Just win)
               viewport $= (Position 0 0, Size (fromIntegral wid) (fromIntegral hei))
 
+withDrawer :: (Drawer -> IO a) -> IO a
+withDrawer action = do
+    drawer <- createDrawer
+    action drawer `finally` destroyDrawer drawer
+
 createDrawer :: IO Drawer
 createDrawer
     = withObjectName2 $ \vao vbo -> do
         bindVertexArrayObject $= Just vao
         bindBuffer ArrayBuffer $= Just vbo
-        withProgram $ \prog -> do
+        loadProgram $ \prog -> do
             vpos <- get $ attribLocation prog "vpos"
             vcolor <- get $ attribLocation prog "vcolor"
             vtexcoord <- get $ attribLocation prog "vtexcoord"
@@ -91,6 +96,11 @@ destroyDrawer (Drawer vao vbo prog) = do
     deleteObjectName vao
     deleteObjectName vbo
     deleteObjectName prog
+
+withImage :: Integral a => a -> a -> [DrwColor] -> (Image -> IO a) -> IO a
+withImage width height pixels action = do
+    img <- createImage width height pixels
+    action img `finally` destroyImage img
 
 createImage :: Integral a => a -> a -> [DrwColor] -> IO Image
 createImage width height pixels
@@ -183,8 +193,8 @@ withShader ty source action = do
             shaderInfoLog shader >>= throwIO . DrawerException
         action shader
 
-withProgram :: (Program -> IO a) -> IO a
-withProgram action = do
+loadProgram :: (Program -> IO a) -> IO a
+loadProgram action = do
     createProgram `bracketOnError` deleteObjectName $ \prog -> do
         withShader VertexShader vertexShaderSource $ \vs -> do
             attachShader prog vs

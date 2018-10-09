@@ -41,6 +41,10 @@ data Command :: * -> * where
     Move :: Uid -> Dir -> Command ()
     Quit :: Uid -> Command ()
 
+isQuit :: Command -> Bool
+isQuit (Quit _) = True
+isQuit _ = False
+
 instance Show (Command a) where
     show (Spawn c) = "Spawn " ++ show c
     show (Move uid dir) = "Move " ++ show uid ++ " " ++ show dir
@@ -150,9 +154,16 @@ inSight gs uid
       in (< unitSight unit) . distance (unitPos unit)
 
 amIAlive :: GameState -> Bool
-amIAlive gs = case gsMyUid gs of
-    Just uid -> isUnitAlive gs uid
-    Nothing -> False
+amIAlive gs
+    = case gsMyUid gs of
+        Just uid -> isUnitAlive gs uid
+        Nothing -> False
+
+amIWatcher :: GameState -> Bool
+amIWatcher gs
+    = case gsMyUid gs of
+        Just uid -> not . isUnitAlive gs $ uid
+        Nothing -> False
 
 allDead :: GameState -> Bool
 allDead = all ((<= 0) . unitHp) . (Map.elems . gsUnits)
@@ -199,3 +210,6 @@ runCommand gs (Move uid dir)
                  in ((), gs')
 runCommand gs (Quit uid)
     = ((), modifyUnitById gs uid $ \u -> u { unitHp = 0 })
+
+execCommand :: GameState -> Command a -> GameState
+execCommand gs = snd . runCommand gs
