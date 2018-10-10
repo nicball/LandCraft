@@ -16,6 +16,31 @@ data CoordSys = CoordSys Int
 
 type Coord = (Int, Int)
 
+data Unit
+    = Unit { unitSight :: Int
+           , unitHp :: Int
+           , unitPos :: Coord
+           }
+    deriving Eq
+
+data Command :: * -> * where
+    Spawn :: Coord -> Command Uid
+    Move :: Uid -> Dir -> Command ()
+    Quit :: Uid -> Command ()
+
+data WrappedCommand where
+    WrappedCommand :: Command a -> WrappedCommand
+
+data Program :: * -> * where
+    PureP :: a -> Program a
+    BindP :: (Command a) -> (a -> Program b) -> Program b
+
+data GameState
+    = GameState { gsUnits :: Map Uid Unit
+                , gsMyUid :: Maybe Uid
+                , gsCoordSys :: CoordSys
+                }
+
 validCoord :: CoordSys -> Coord -> Bool
 validCoord (CoordSys size) (x, y)
     = x >= 0 && x < size && y >= 0 && y < size
@@ -36,11 +61,6 @@ distance (x1, y1) (x2, y2)
 
 type Uid = Int
 
-data Command :: * -> * where
-    Spawn :: Coord -> Command Uid
-    Move :: Uid -> Dir -> Command ()
-    Quit :: Uid -> Command ()
-
 isQuit :: Command -> Bool
 isQuit (Quit _) = True
 isQuit _ = False
@@ -49,9 +69,6 @@ instance Show (Command a) where
     show (Spawn c) = "Spawn " ++ show c
     show (Move uid dir) = "Move " ++ show uid ++ " " ++ show dir
     show (Quit uid) = "Quit " ++ show uid
-
-data WrappedCommand where
-    WrappedCommand :: Command a -> WrappedCommand
 
 instance Show WrappedCommand where
     show (WrappedCommand cmd) = show cmd
@@ -73,10 +90,6 @@ instance Binary WrappedCommand where
             0 -> WrappedCommand . Spawn <$> Bin.get
             1 -> WrappedCommand <$> (Move <$> Bin.get <*> Bin.get)
             2 -> WrappedCommand . Quit <$> Bin.get
-
-data Program :: * -> * where
-    PureP :: a -> Program a
-    BindP :: (Command a) -> (a -> Program b) -> Program b
 
 instance Functor Program where
     fmap f (PureP a) = PureP (f a)
@@ -104,21 +117,8 @@ move uid dir = BindP (Move uid dir) return
 quit :: Uid -> Program ()
 quit = liftCommand . Quit
 
-data Unit
-    = Unit { unitSight :: Int
-           , unitHp :: Int
-           , unitPos :: Coord
-           }
-    deriving Eq
-
 defaultUnit :: Coord -> Unit
 defaultUnit = Unit 4 5
-
-data GameState
-    = GameState { gsUnits :: Map Uid Unit
-                , gsMyUid :: Maybe Uid
-                , gsCoordSys :: CoordSys
-                }
 
 emptyGameState :: CoordSys -> GameState
 emptyGameState = GameState Map.empty Nothing 

@@ -16,6 +16,13 @@ import Network
 import Render
 import Util
 
+data Resources = Resources
+    { resGameBoardImg :: Image
+    , resPlainImg :: Image
+    , resMistImg :: Image
+    , resUnitImg :: Image
+    }
+
 startClient :: String-> String -> String -> IO ()
 startClient userName serverName serverPort = withSocketsDo $ do
     gameState <- newMVar (emptyGameState mapSize)
@@ -31,20 +38,21 @@ startClient userName serverName serverPort = withSocketsDo $ do
                           userCmdChan
                           postEmptyEvent
                           (windowShouldClose win True)
-            when connected . withDrawer $ \drawer -> do
-                clearColor $= Color4 0 0 0 0
-                setKeyCallback win . Just $ onKeyboard gameState userCmdChan
-                mainLoop win drawer gameState
-    where mainLoop win drawer gameState = do
+            when connected . withDrawer $ \drawer ->
+                withResources $ \res -> do
+                    clearColor $= Color4 0 0 0 0
+                    setKeyCallback win . Just $ onKeyboard gameState userCmdChan
+                    mainLoop win drawer res gameState
+    where mainLoop win drawer res gameState = fix $ \loop -> do
               clear [ColorBuffer]
               gs <- readMVar gameState
-              drawGame drawer gs
+              drawGame drawer res gs
               swapBuffers win
               waitEvents
               closep <- windowShouldClose win
               if closep 
               then putStrLn "exiting"
-              else mainLoop win drawer gameState
+              else loop
 
 withConnectionFork :: String -> String -> String -> (Handle -> IO ()) -> IO Bool
 withConnectionFork userName serverName serverPort action = do
@@ -108,44 +116,62 @@ gameLogic gameState userCmdChan updateScreen gameOver conn
             return False
         else return True
 
-drawGame :: Drawer -> GameState -> IO ()
-drawGame drawer gameState = do
-    drawCells
-    if amIAlive gameState
-    then drawView . fromJust . gsMyUid $ gameState
-    else when (amIWatcher gameState) drawAll
-    where drawCells =
-              let coords = concat [[(i, 0), (i, 1), (0, i), (1, i)] |
+drawGame :: Drawer -> Resources -> GameState -> IO ()
+drawGame drawer res gameState = do
+    drawGameBoard
+    forM_ allCellCoords $ \(x, y) ->
+        if amIAlive gameState
+        then if inSight (fromJust $ gsMyUid gs) (x, y)
+             then drawCell x y
+             else drawMist x y
+        else if amIWatcher gameState
+        then drawCell x y
+        else drawMist x y
+    drawGridLines
+    where drawGameBoard
+              = drawImage drawer (resGameBoardImg res) (-1, -1) 2 2
+          drawGridLines =
+              let coords = concat [[(i, 0), (i, mapSize), (0, i), (mapSize, i)] |
                                   i <- [1 .. mapSize - 1]]
-                  vcs = map (\(x, y) -> ( (x * cellSize - 1, y * cellSize - 1)
-                                          , (1, 1, 1, 1)
-                                          ))
+                  vcs = map (\(x, y) -> ( ( fromIntegral x * cellSize - 1
+                                          , fromIntegral y * cellSize - 1
+                                          )
+                                        , (1, 1, 1, 1)
+                                        ))
                             coords
               in drawColor drawer Lines vcs
-          drawAll x y = case findAliveUnitByPos gameState (x, y) of
-              Just unit -> drawUnit unit
-              Nothing -> plainTile
-          drawView uid x y
-              = if inSight gameState uid (x, y)
-                then case findAliveUnitByPos gameState (x, y) of
-                    Just unit -> drawUnitMe (findUnitById gameState uid) unit
-                    Nothing -> plainTile
-                else mistTile
-          drawUnit unit = withColor unit "U"
-          drawUnitMe me unit = withColor unit $
-              if me == unit
-              then "M"
-              else "U"
-          withColor unit str
-              = let hp = unitHp unit
-                    color = setSGRCode [SetColor Foreground Vivid $
-                        if hp >= 5 then Green
-                        else if hp >= 3 then Yellow
-                        else Red]
-                in color ++ str ++ setSGRCode []
+          drawCell x y
+              = case findAliveUnitByPos gameState (x, y) of
+                  Just unit -> drawUnit drawer unit (resUnitImg res) (cellPos x y) cellSize
+                  Nothing -> drawPlain x y
+          drawMist x y
+              = drawImage drawer (resMistImg res) (cellPos x y) cellSize cellSize
+          drawPlain x y
+              = drawImage drawer (resPlainImg res) (cellPos x y) cellSize cellSize
           CoordSys mapSize = gsCoordSys gameState
           cellSize = 2 / fromIntegral mapSize
-          cellPos x y = (x * cellSize - 1, (y + 1) * cellSize - 1)
+          cellPos x y = (x * cellSize - 1, y * cellSize - 1)
+          allCellCoords = [(x, y) | let a = [0 .. mapSize - 1], x <- a, y <- a]
+
+drawUnit :: Drawer -> Unit -> Image -> (GLfloat, GLfloat) -> GLfloat -> IO ()
+drawUnit drawer unit img pos@(x, y) cellSize = do
+    drawImage drawer img pos cellSize (cellSize * 0.8)
+    let origin = (x, y + cellSize * 0.8)
+        width = cellSize * fromIntegral (unitHp unit)
+                         / fromIntegral (unitHp defaultUnit)
+        height = cellSize * 0.2
+        color = calcColor (unitHp unit)
+        vcs = [ ((x        , y         ), color)
+              , ((x        , y + height), color)
+              , ((x + width, y         ), color)
+              , ((x        , y + height), color)
+              , ((x + width, y + height), color)
+              , ((x + width, y         ), color)
+              ]
+    drawColor drawer Triangles vcs
+    where calcColor hp | hp >= 5 = (0, 1, 0, 1)
+                       | hp >= 3 = (1, 1, 0, 1)
+                       otherwise = (1, 0, 0, 1)  
 
 onKeyboard :: Window
            -> MVar GameState
