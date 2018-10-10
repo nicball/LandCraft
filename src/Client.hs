@@ -89,7 +89,7 @@ gameLogic :: MVar GameState
           -> Handle
           -> IO ()
 gameLogic gameState userName userCmdChan updateScreen gameOver conn
-    = while $ do
+    = flip finally gameOver . while $ do
         msg <- unserialize conn :: IO (Maybe String, Message)
         case msg of
             (Nothing, Poll) -> do
@@ -122,7 +122,6 @@ gameLogic gameState userName userCmdChan updateScreen gameOver conn
         if allDead gs && isJust (gsMyUid gs)
         then do
             putStrLn "Everyone died. Game over."
-            gameOver
             return False
         else return True
 
