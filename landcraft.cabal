@@ -19,13 +19,16 @@ executable landcraft
     default-language: Haskell2010
     default-extensions: GADTs KindSignatures DeriveGeneric QuasiQuotes
     build-depends: base >=4.7 && <5
+                 , assert -any
                  , binary -any
                  , bytestring -any
+                 , clock -any
                  , containers -any
+                 , GLFW-b -any
+                 , JuicyPixels -any
                  , network -any
+                 , OpenGL -any
                  , random -any
                  , raw-strings-qq -any
-                 , OpenGL -any
-                 , GLUT -any
-                 , clock -any
-                 , assert -any
+                 , StateVar -any
+                 , vector -any

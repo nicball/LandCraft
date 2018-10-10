@@ -13,3 +13,15 @@ roomSize = 2
 
 mapSize :: CoordSys
 mapSize = CoordSys 10
+
+gameBoardImgPath :: String
+gameBoardImgPath = "gb.jpg"
+
+plainImgPath :: String
+plainImgPath = "pl.jpg"
+
+mistImgPath :: String
+mistImgPath = "mi.jpg"
+
+unitImgPath :: String
+unitImgPath = "ui.jpg"

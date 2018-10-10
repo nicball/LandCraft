@@ -97,7 +97,7 @@ destroyDrawer (Drawer vao vbo prog) = do
     deleteObjectName vbo
     deleteObjectName prog
 
-withImage :: Integral a => a -> a -> [DrwColor] -> (Image -> IO a) -> IO a
+withImage :: Integral n => n -> n -> [DrwColor] -> (Image -> IO a) -> IO a
 withImage width height pixels action = do
     img <- createImage width height pixels
     action img `finally` destroyImage img

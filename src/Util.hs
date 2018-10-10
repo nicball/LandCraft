@@ -1,6 +1,7 @@
 module Util where
 
 import Control.Concurrent.Chan
+import Control.Monad
 import System.Clock
 
 data TimeoutChan a

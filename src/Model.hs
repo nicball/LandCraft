@@ -61,7 +61,7 @@ distance (x1, y1) (x2, y2)
 
 type Uid = Int
 
-isQuit :: Command -> Bool
+isQuit :: Command a -> Bool
 isQuit (Quit _) = True
 isQuit _ = False
 
