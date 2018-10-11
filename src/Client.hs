@@ -20,8 +20,7 @@ import Render
 import Util
 
 data Resources = Resources
-    { resGameBoardImg :: Image
-    , resPlainImg :: Image
+    { resPlainImg :: Image
     , resMistImg :: Image
     , resUnitImg :: Image
     }
@@ -127,7 +126,6 @@ gameLogic gameState userName userCmdChan updateScreen gameOver conn
 
 drawGame :: Drawer -> Resources -> GameState -> IO ()
 drawGame drawer res gameState = do
-    drawGameBoard
     forM_ allCellCoords $ \(x, y) ->
         if amIAlive gameState
         then if inSight gameState (fromJust $ gsMyUid gameState) (x, y)
@@ -137,9 +135,7 @@ drawGame drawer res gameState = do
         then drawCell x y
         else drawMist x y
     drawGridLines
-    where drawGameBoard
-              = drawImage drawer (resGameBoardImg res) (-1, -1) 2 2
-          drawGridLines =
+    where drawGridLines =
               let coords = concat [[(i, 0), (i, mapSize), (0, i), (mapSize, i)] |
                                   i <- [1 .. mapSize - 1]]
                   vcs = map (\(x, y) -> ( ( fromIntegral x * cellSize - 1
@@ -206,11 +202,10 @@ onKeyboard win gameState userCmdChan evwin key _ keyState mods = do
 
 withResources :: (Resources -> IO a) -> IO a
 withResources action = do
-    withPicture gameBoardImgPath $ \gbImg ->
-        withPicture plainImgPath $ \plImg ->
+    withPicture plainImgPath $ \plImg ->
         withPicture mistImgPath $ \miImg ->
         withPicture unitImgPath $ \unImg ->
-            action (Resources gbImg plImg miImg unImg)
+            action (Resources plImg miImg unImg)
     where withPicture path action = do
               img <- Juicy.readImage path
               rgba8@(Juicy.Image width height _) <- case img of
