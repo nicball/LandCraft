@@ -16,17 +16,17 @@ roomSize = 2
 startServer :: Integral a => a -> IO ()
 startServer port
     = withSocketsDo
-    . bracketOnError (socket AF_INET Stream defaultProtocol) close $ \sock -> do
+    $ socket AF_INET Stream defaultProtocol `bracketOnError` close $ \sock -> do
         setSocketOption sock ReuseAddr 1
         bind sock (SockAddrInet (fromIntegral port) (tupleToHostAddress (0, 0, 0, 0)))
         listen sock 5
         hPutStrLn stderr "Listening..."
         sessions <- newMVar Map.empty
-        forever . acceptAsync sock $ \hdl addr -> do
+        forever $ acceptAsync sock \hdl addr -> do
             hPutStrLn stderr ("Incoming connection: " ++ show addr ++ ".")
             Join name <- expect hdl isJoin
             hPutStrLn stderr (name ++ " (" ++ show addr ++ ") connected.")
-            (joined, complete) <- modifyMVar sessions $ \ss ->
+            (joined, complete) <- modifyMVar sessions \ss ->
                 if Map.member name ss
                 then return (ss, (False, Nothing))
                 else let ss' = Map.insert name hdl ss
@@ -50,8 +50,8 @@ acceptAsync sock f = do
 startRoom :: Map String Handle -> IO ()
 startRoom sessions = do
     hPutStrLn stderr ("Room started with " ++ show (Map.keys sessions) ++ ".")
-    forever . forM_ (Map.assocs sessions) $ \(name, hdl) -> do
+    forever $ forM_ (Map.assocs sessions) \(name, hdl) -> do
         serialize hdl (Nothing :: Maybe String, Poll)
         cmd <- expect hdl isCommandOrNoCommand
-        when (isCommand cmd) . forM_ (Map.assocs sessions) $ \(_, h) ->
+        when (isCommand cmd) $ forM_ (Map.assocs sessions) \(_, h) ->
             serialize h (Just name, cmd)

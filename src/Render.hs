@@ -37,7 +37,7 @@ type ScreenCoord = (GLfloat, GLfloat)
 
 withGLFW :: IO a -> IO a
 withGLFW action = do
-    GLFW.setErrorCallback . Just $ \err str ->
+    GLFW.setErrorCallback $ Just \err str ->
         throwIO . GLFWException $ show err ++ ": " ++ str
     success <- GLFW.init
     unless success . throwIO . GLFWException $ "Unable to initialize GLFW."
@@ -69,10 +69,10 @@ withDrawer action = do
 
 createDrawer :: IO Drawer
 createDrawer
-    = withObjectName2 $ \vao vbo -> do
+    = withObjectName2 \vao vbo -> do
         bindVertexArrayObject $= Just vao
         bindBuffer ArrayBuffer $= Just vbo
-        loadProgram $ \prog -> do
+        loadProgram \prog -> do
             vpos <- get $ attribLocation prog "vpos"
             vcolor <- get $ attribLocation prog "vcolor"
             vtexcoord <- get $ attribLocation prog "vtexcoord"
@@ -105,10 +105,10 @@ withImage width height pixels action = do
 createImage :: Integral a => a -> a -> [DrwColor] -> IO Image
 createImage width height pixels
     = assert (length pixels == fromIntegral (width * height))
-    $ withObjectName $ \tex -> do
+    $ withObjectName \tex -> do
         textureBinding Texture2D $= Just tex
         let buffer = concatMap (\(r, g, b, a) -> [r, g, b, a]) pixels
-        withArray buffer $ \ptr ->
+        withArray buffer \ptr ->
             texImage2D Texture2D NoProxy 0 RGBA' (TextureSize2D (fromIntegral width) (fromIntegral height))
                 0 (PixelData RGBA Float ptr)
         generateMipmap' Texture2D
@@ -145,7 +145,7 @@ drawColor drawer mode vcs = do
     let buffer = concatMap (\(v, c) -> v2l v ++ c2l c ++ [0, 0]) vcs
         v2l (x, y) = [x, y]
         c2l (r, g, b, a) = [r, g, b, a]
-    withArray buffer $ \ptr -> do
+    withArray buffer \ptr -> do
         let size = fromIntegral $ length buffer * sizeOf (1 :: GLfloat)
         bindBuffer ArrayBuffer $= Just (drawer_vbo drawer)
         bufferData ArrayBuffer $= (size, ptr, StaticDraw)
@@ -173,7 +173,7 @@ drawImage drawer (Image image) (posX, posY) width height = do
                  , posX + width, posY         , 1, 1, 1, 1, 1, 0
                  , posX + width, posY + height, 1, 1, 1, 1, 1, 1
                  ]
-    withArray buffer $ \ptr -> do
+    withArray buffer \ptr -> do
         let size = fromIntegral $ length buffer * sizeOf (1 :: GLfloat)
         bindBuffer ArrayBuffer $= Just (drawer_vbo drawer)
         bufferData ArrayBuffer $= (size, ptr, StaticDraw)
@@ -196,9 +196,9 @@ withShader ty source action = do
 loadProgram :: (Program -> IO a) -> IO a
 loadProgram action = do
     createProgram `bracketOnError` deleteObjectName $ \prog -> do
-        withShader VertexShader vertexShaderSource $ \vs -> do
+        withShader VertexShader vertexShaderSource \vs -> do
             attachShader prog vs
-            withShader FragmentShader fragmentShaderSource $ \fs -> do
+            withShader FragmentShader fragmentShaderSource \fs -> do
                 attachShader prog fs
                 linkProgram prog
                 stat <- linkStatus prog
@@ -259,6 +259,6 @@ withObjectName2 :: (GeneratableObjectName a, GeneratableObjectName b)
                 => (a -> b -> IO c)
                 -> IO c
 withObjectName2 action
-    = withObjectName $ \a ->
-        withObjectName $ \b ->
+    = withObjectName \a ->
+        withObjectName \b ->
             action a b

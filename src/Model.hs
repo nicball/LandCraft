@@ -209,7 +209,7 @@ runCommand gs (Move uid dir)
                      gs' = gs { gsUnits = Map.insert uid unit' (gsUnits gs) }
                  in ((), gs')
 runCommand gs (Quit uid)
-    = ((), modifyUnitById gs uid $ \u -> u { unitHp = 0 })
+    = ((), modifyUnitById gs uid \u -> u { unitHp = 0 })
 
 execCommand :: GameState -> Command a -> GameState
 execCommand gs = snd . runCommand gs

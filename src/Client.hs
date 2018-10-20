@@ -29,28 +29,28 @@ data ResourceException = LoadException String deriving Show
 instance Exception ResourceException
 
 startClient :: String-> String -> String -> IO ()
-startClient userName serverName serverPort = withSocketsDo $ do
+startClient userName serverName serverPort = withSocketsDo do
     gameState <- newMVar (emptyGameState mapSize)
     userCmdChan <- newTimeoutChan
-    withGLFW $ do
+    withGLFW do
         ver <- getVersionString
         case ver of
             Just str -> putStrLn str
             Nothing -> return ()
-        withWindow 600 600 "Land Craft" $ \win -> do
+        withWindow 600 600 "Land Craft" \win -> do
             connected <- withConnectionFork userName serverName serverPort $
                 gameLogic gameState
                           userName
                           userCmdChan
                           postEmptyEvent
                           (setWindowShouldClose win True)
-            when connected . withDrawer $ \drawer ->
-                withResources $ \res -> do
+            when connected $ withDrawer \drawer ->
+                withResources \res -> do
                     clearColor $= Color4 0 0 0 0
                     setKeyCallback win . Just $
                         onKeyboard win gameState userCmdChan
                     mainLoop win drawer res gameState
-    where mainLoop win drawer res gameState = fix $ \loop -> do
+    where mainLoop win drawer res gameState = fix \loop -> do
               clear [ColorBuffer]
               gs <- readMVar gameState
               drawGame drawer res gs
@@ -88,7 +88,7 @@ gameLogic :: MVar GameState
           -> Handle
           -> IO ()
 gameLogic gameState userName userCmdChan updateScreen gameOver conn
-    = flip finally gameOver . while $ do
+    = flip finally gameOver $ while do
         msg <- unserialize conn :: IO (Maybe String, Message)
         case msg of
             (Nothing, Poll) -> do
@@ -104,11 +104,11 @@ gameLogic gameState userName userCmdChan updateScreen gameOver conn
                         coord <- genLocation gs
                         serialize conn (Command (WrappedCommand (Spawn coord)))
             (Just nm, Command (WrappedCommand cmd)) -> do
-                modifyMVar_ gameState $ \gs ->
+                modifyMVar_ gameState \gs ->
                     case cmd of
                         Spawn _ | nm == userName ->
                             let (uid, gs') = runCommand gs cmd
-                            in return  gs' { gsMyUid = Just uid }
+                            in return gs' { gsMyUid = Just uid }
                         _ -> return $ execCommand gs cmd
                 updateScreen
                 when (isQuit cmd) . putStrLn $ nm ++ " quited."
@@ -126,7 +126,7 @@ gameLogic gameState userName userCmdChan updateScreen gameOver conn
 
 drawGame :: Drawer -> Resources -> GameState -> IO ()
 drawGame drawer res gameState = do
-    forM_ allCellCoords $ \(x, y) ->
+    forM_ allCellCoords \(x, y) ->
         if amIAlive gameState
         then if inSight gameState (fromJust $ gsMyUid gameState) (x, y)
              then drawCell x y
@@ -202,9 +202,9 @@ onKeyboard win gameState userCmdChan evwin key _ keyState mods = do
 
 withResources :: (Resources -> IO a) -> IO a
 withResources action = do
-    withPicture plainImgPath $ \plImg ->
-        withPicture mistImgPath $ \miImg ->
-        withPicture unitImgPath $ \unImg ->
+    withPicture plainImgPath \plImg ->
+        withPicture mistImgPath \miImg ->
+        withPicture unitImgPath \unImg ->
             action (Resources plImg miImg unImg)
     where withPicture path action = do
               img <- Juicy.readImage path
